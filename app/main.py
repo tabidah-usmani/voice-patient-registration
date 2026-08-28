@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import date
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
+from fastapi import Request
 
 from app import models, schemas, crud
 from app.database import engine, get_db, Base
@@ -69,7 +70,48 @@ def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)
     created = crud.create_patient(db, patient)
     logger.info(f"Created patient: {created.patient_id} {created.first_name} {created.last_name}")
     return envelope(data=schemas.PatientOut.model_validate(created))
+@app.post("/vapi/register-patient")
+async def vapi_register_patient(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    tool_calls = body.get("message", {}).get("toolCalls", [])
+    if not tool_calls:
+        return {"results": [{"toolCallId": "unknown", "result": "No tool call found"}]}
 
+    call = tool_calls[0]
+    call_id = call.get("id")
+    arguments = call.get("function", {}).get("arguments", {})
+
+    try:
+        patient_data = schemas.PatientCreate(**arguments)
+    except Exception as e:
+        return {"results": [{"toolCallId": call_id, "result": f"Validation error: {str(e)}"}]}
+
+    existing = crud.get_patient_by_phone(db, patient_data.phone_number)
+    if existing:
+        return {"results": [{"toolCallId": call_id, "result": f"A patient with this phone number is already registered ({existing.first_name} {existing.last_name}). Ask the caller if they'd like to update instead."}]}
+
+    created = crud.create_patient(db, patient_data)
+    logger.info(f"Created patient via Vapi: {created.patient_id} {created.first_name} {created.last_name}")
+    return {"results": [{"toolCallId": call_id, "result": f"Successfully registered {created.first_name} {created.last_name}."}]}
+
+
+@app.post("/vapi/lookup-patient")
+async def vapi_lookup_patient(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    tool_calls = body.get("message", {}).get("toolCalls", [])
+    if not tool_calls:
+        return {"results": [{"toolCallId": "unknown", "result": "No tool call found"}]}
+
+    call = tool_calls[0]
+    call_id = call.get("id")
+    arguments = call.get("function", {}).get("arguments", {})
+    phone_number = arguments.get("phone_number", "")
+
+    patient = crud.get_patient_by_phone(db, phone_number)
+    if not patient:
+        return {"results": [{"toolCallId": call_id, "result": "No existing patient found with this phone number."}]}
+
+    return {"results": [{"toolCallId": call_id, "result": f"Existing patient found: {patient.first_name} {patient.last_name}, DOB {patient.date_of_birth}."}]}
 @app.put("/patients/{patient_id}")
 def update_patient(patient_id: str, patient: schemas.PatientUpdate, db: Session = Depends(get_db)):
     updated = crud.update_patient(db, patient_id, patient)
