@@ -106,7 +106,7 @@ async def vapi_lookup_patient(request: Request, db: Session = Depends(get_db)):
     call_id = call.get("id")
     arguments = call.get("function", {}).get("arguments", {})
     phone_number = arguments.get("phone_number", "")
-
+    phone_number = str(phone_number) if phone_number else ""
     patient = crud.get_patient_by_phone(db, phone_number)
     if not patient:
         return {"results": [{"toolCallId": call_id, "result": "No existing patient found with this phone number."}]}
@@ -127,6 +127,7 @@ async def vapi_update_patient(request: Request, db: Session = Depends(get_db)):
     phone_number = arguments.pop("phone_number", None)
     if not phone_number:
         return {"results": [{"toolCallId": call_id, "result": "Missing phone_number to identify which record to update."}]}
+    phone_number = str(phone_number)
 
     existing = crud.get_patient_by_phone(db, phone_number)
     if not existing:

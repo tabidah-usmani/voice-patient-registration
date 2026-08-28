@@ -50,6 +50,8 @@ class PatientBase(BaseModel):
     def phone_format(cls, v):
         if v is None:
             return v
+        v = str(v)
+
         digits = re.sub(r"\D", "", v)
         if len(digits) != 10:
             raise ValueError("Phone number must be a valid 10-digit US number")
@@ -121,6 +123,7 @@ class PatientUpdate(BaseModel):
     def phone_format(cls, v):
         if v is None:
             return v
+        v = str(v)
         digits = re.sub(r"\D", "", v)
         if len(digits) != 10:
             raise ValueError("Phone number must be a valid 10-digit US number")
