@@ -37,7 +37,7 @@ Phone Call (Caller)
 ```
 
 **Why an adapter layer (`/vapi/*` routes) instead of pointing Vapi directly at `/patients`:**
-Vapi's tool-call webhook wraps function arguments inside its own JSON envelope (`message.toolCalls[0].function.arguments`), rather than sending a flat body matching the target schema. Rather than bending the public REST API's contract to accommodate one client's webhook format, dedicated adapter endpoints (`/vapi/register-patient`, `/vapi/lookup-patient`, `/vapi/update-patient`, `/vapi/call-ended`) unwrap Vapi's envelope and delegate to the same `crud.py` service functions used by the public API. This keeps `/patients` RESTful and standards-compliant for any other consumer, while giving Vapi exactly the interface it needs.
+Vapi's tool-call webhook wraps function arguments inside its own JSON envelope (`message.toolCalls[0].function.arguments`), rather than sending a flat body matching the target schema. Rather than bending the public REST API's contract to accommodate one client's webhook format, dedicated adapter endpoints (`/vapi/register-patient`, `/vapi/lookup-patient`, `/vapi/update-patient`, `/vapi/schedule-appointment`, `/vapi/call-ended`) unwrap Vapi's envelope and delegate to the same `crud.py` service functions used by the public API. This keeps `/patients` RESTful and standards-compliant for any other consumer, while giving Vapi exactly the interface it needs.
 
 ## Tech Stack & Justification
 
@@ -74,10 +74,11 @@ All responses use a consistent envelope: `{ "data": ..., "error": ... }`.
 | GET | `/patients` | List all patients. Supports `?last_name=`, `?date_of_birth=`, `?phone_number=` filters. |
 | GET | `/patients/{id}` | Retrieve a single patient by UUID. |
 | GET | `/patients/{id}/calls` | Retrieve all call transcripts linked to a patient. |
+| GET | `/calls` | Retrieve the 50 most recent call transcripts across all patients (used by the dashboard's call-count stat). |
 | POST | `/patients` | Create a new patient. Rejects duplicate phone numbers with a 400. |
 | PUT | `/patients/{id}` | Partial update of an existing patient. |
 | DELETE | `/patients/{id}` | Soft-delete (sets `deleted_at`; record is never hard-deleted). |
-| GET | `/dashboard` | Read-only HTML dashboard listing all registered patients. |
+| GET | `/dashboard` | Read-only HTML dashboard listing all registered patients, with stats including total patients, insurance/emergency-contact coverage, and recorded call count. |
 
 Internal adapter endpoints used only by the Vapi voice agent:
 
@@ -86,6 +87,7 @@ Internal adapter endpoints used only by the Vapi voice agent:
 | POST | `/vapi/lookup-patient` | Checks whether a patient exists for a given phone number. |
 | POST | `/vapi/register-patient` | Creates a new patient from a Vapi tool call. |
 | POST | `/vapi/update-patient` | Updates an existing patient (identified by phone number) from a Vapi tool call. |
+| POST | `/vapi/schedule-appointment` | Schedules a mock first appointment after registration, from a Vapi tool call. |
 | POST | `/vapi/call-ended` | End-of-call webhook; stores the call transcript and links it to a patient if one matches by phone number. |
 
 ## Voice Agent Design
@@ -102,7 +104,7 @@ The assistant is configured with a system prompt (full text in [`system_prompt.m
 8. Only after confirmation, offer optional fields (insurance, emergency contact, preferred language) as an opt-in bundle, per the assessment's conversational note.
 9. On a save failure, apologize once, retry, and — if it still fails — offer a callback rather than leaving the caller with silence or a dead end.
 
-Three tools connect the LLM to the backend: `lookup_patient_by_phone`, `register_patient`, and `update_patient`, each mapped to one of the `/vapi/*` adapter endpoints described above, and all three fully verified over real inbound phone calls. A separate, non-tool end-of-call webhook (`/vapi/call-ended`) fires automatically when each call ends, independent of anything the LLM decides — this is how call transcripts get captured even if a call ends unexpectedly mid-conversation. This webhook has been verified against Vapi's web-call testing widget but not yet against a real PSTN call (see Known Limitations).
+Four tools connect the LLM to the backend: `lookup_patient_by_phone`, `register_patient`, `update_patient`, and `schedule_appointment`, each mapped to one of the `/vapi/*` adapter endpoints described above. The first three are fully verified over real inbound phone calls; `schedule_appointment` has been verified via Vapi's web-call testing widget. A separate, non-tool end-of-call webhook (`/vapi/call-ended`) fires automatically when each call ends, independent of anything the LLM decides — this is how call transcripts get captured even if a call ends unexpectedly mid-conversation. This webhook has been verified against Vapi's web-call testing widget but not yet against a real PSTN call (see Known Limitations).
 
 ## Bonus Features Implemented
 
@@ -110,9 +112,10 @@ Beyond the core requirements, the following bonus items from the assessment brie
 
 - **Duplicate Detection:** The agent recognizes returning callers by phone number (via `lookup_patient_by_phone`) and offers to update their existing record instead of creating a duplicate. Fully verified over real phone calls.
 - **Multi-language Support:** The system prompt instructs the agent to detect when a caller speaks in or requests another language (e.g., "Hablo español") and switch its responses accordingly for the remainder of the call.
-- **Appointment Scheduling (mock):** After a successful registration, the agent offers to schedule a first appointment via a `schedule_appointment` tool, which returns mock confirmation details (no real calendar integration, per the assessment's guidance that mock data is acceptable). 
+- **Appointment Scheduling (mock):** After a successful registration, the agent offers to schedule a first appointment via a `schedule_appointment` tool, which returns mock confirmation details (no real calendar integration, per the assessment's guidance that mock data is acceptable). During development, this tool was initially misconfigured with the wrong webhook URL (pointing at the update-patient endpoint instead of its own), which was caught via call transcript review and corrected.
 - **Call Recording/Transcript Storage:** Every call's transcript is captured via Vapi's end-of-call webhook and stored in a dedicated `call_transcripts` table, linked to the matching patient record by phone number where available. See the Data Model and REST API sections above.
-- **Dashboard:** A read-only web dashboard (`/dashboard`) displays all registered patients with basic stats and search, reading live from the existing `/patients` endpoint.
+- **Dashboard:** A read-only web dashboard (`/dashboard`) displays all registered patients with stats (total patients, insurance/emergency-contact coverage, and total recorded calls via `/calls`) and a searchable patient table, reading live from the existing `/patients` and `/calls` endpoints.
+- **Automated Tests:** A pytest suite (`test_main.py`) covers patient CRUD, every field-level validation rule (state, DOB, phone, ZIP, sex), duplicate-phone rejection, and soft-delete behavior, running fully isolated against an in-memory SQLite database — no live server or external services required. See the Testing section below.
 
 
 
@@ -148,10 +151,20 @@ Visit `http://127.0.0.1:8000/docs` for interactive API testing, or `http://127.0
 ### Vapi configuration
 
 1. Provision a phone number in the Vapi dashboard (this was provided free on Vapi's trial plan).
-2. Create three tools (`lookup_patient_by_phone`, `register_patient`, `update_patient`), each a POST request to the corresponding `/vapi/*` endpoint above.
+2. Create four tools (`lookup_patient_by_phone`, `register_patient`, `update_patient`, `schedule_appointment`), each a POST request to the corresponding `/vapi/*` endpoint above.
 3. Set the assistant's **Server URL** (end-of-call webhook) to `/vapi/call-ended`, so transcripts are captured automatically at the end of every call.
 4. Create an assistant with the system prompt in `system_prompt.md`, attach all three tools to it.
 5. Attach the assistant to the phone number under the number's inbound assistant setting.
+
+## Testing
+
+Run the automated test suite with:
+```bash
+pip install pytest httpx
+pytest test_main.py -v
+```
+
+This covers patient creation, retrieval, filtering, partial updates, soft-deletion, every field-level validation rule (invalid state, future date of birth, malformed phone number, invalid ZIP, invalid sex value), duplicate-phone rejection, and the root status endpoint — 18 tests total, running fully isolated against an in-memory SQLite database with no dependency on the live deployment, Postgres, or Vapi.
 
 ## Known Limitations & Trade-offs
 
@@ -164,13 +177,12 @@ Visit `http://127.0.0.1:8000/docs` for interactive API testing, or `http://127.0
 - **Vapi records and stores call audio** on its own infrastructure by default; no HIPAA compliance is claimed or required, per the assessment's explicit scope (no real patient data is used).
 - **No automated test suite** was built given the time budget; manual testing was done via Swagger UI, the dashboard, and live test calls.
 - **Retry logic in the voice agent** is prompt-driven (the LLM decides to retry and eventually offer a callback) rather than governed by explicit backend retry/backoff logic.
-- **Bonus features not attempted:** Given the time budget, no automated tests beyond manual verification were built (see below), and the dashboard does not yet support editing records (read-only by design, per the assessment's suggestion of a display-only view).
+- **Remaining gaps:** the dashboard is intentionally read-only (no in-place editing), matching the assessment's suggestion of a display view rather than a management interface.
 
 ## Next Steps
 
 With more time, the following would be prioritized:
-- Automated integration tests for the `/patients` and `/vapi/*` endpoints
 - Support for updating a caller's phone number itself (currently used as the lookup key)
-- Multi-language support triggered by caller language detection
-- Dashboard filtering/sorting and a detail view per patient showing their linked call transcripts
+- Dashboard editing capability and a dedicated recent-calls table view (currently a count only)
 - Explicit backend-level retry/backoff for tool-call failures, rather than relying on prompt instructions alone
+- Broader automated test coverage extending into the `/vapi/*` adapter endpoints and the appointment-scheduling/lookup flows
