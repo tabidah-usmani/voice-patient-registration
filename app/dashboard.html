@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Patient Registration Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-soft: rgba(56, 189, 248, 0.12);
+    --good: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 4px 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  input, button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  button {
+    cursor: pointer;
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  button:hover { background: rgba(56, 189, 248, 0.22); }
+  .stat-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 20px;
+    min-width: 140px;
+  }
+  .stat .num {
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .stat .label {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    background: rgba(255,255,255,0.02);
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .empty, .error, .loading {
+    padding: 40px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .error { color: #f87171; }
+  .footer-note {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Patient Registration Dashboard</h1>
+<div class="subtitle">Live view of patients registered via the voice agent and REST API &middot; <a href="/docs">API docs</a></div>
+
+<div class="stat-row" id="stats"></div>
+
+<div class="toolbar">
+  <input type="text" id="searchInput" placeholder="Filter by last name..." />
+  <button onclick="loadPatients()">Refresh</button>
+</div>
+
+<div id="content" class="loading">Loading patients&hellip;</div>
+
+<div class="footer-note">
+  Data is fetched live from <code>GET /patients</code>. This page is read-only and does not create, update, or delete records.
+</div>
+
+<script>
+async function loadPatients() {
+  const contentEl = document.getElementById('content');
+  const statsEl = document.getElementById('stats');
+  const search = document.getElementById('searchInput').value.trim();
+
+  contentEl.className = 'loading';
+  contentEl.innerHTML = 'Loading patients&hellip;';
+
+  try {
+    const url = search
+      ? `/patients?last_name=${encodeURIComponent(search)}`
+      : '/patients';
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if (json.error) {
+      contentEl.className = 'error';
+      contentEl.textContent = 'Error: ' + JSON.stringify(json.error);
+      statsEl.innerHTML = '';
+      return;
+    }
+
+    const patients = json.data || [];
+
+    statsEl.innerHTML = `
+      <div class="stat">
+        <div class="num">${patients.length}</div>
+        <div class="label">Total Patients</div>
+      </div>
+      <div class="stat">
+        <div class="num">${patients.filter(p => p.insurance_provider).length}</div>
+        <div class="label">With Insurance</div>
+      </div>
+      <div class="stat">
+        <div class="num">${patients.filter(p => p.emergency_contact_name).length}</div>
+        <div class="label">With Emergency Contact</div>
+      </div>
+    `;
+
+    if (patients.length === 0) {
+      contentEl.className = 'empty';
+      contentEl.textContent = 'No patients found.';
+      return;
+    }
+
+    const rows = patients.map(p => `
+      <tr>
+        <td>${escapeHtml(p.first_name)} ${escapeHtml(p.last_name)}</td>
+        <td>${escapeHtml(p.date_of_birth)}</td>
+        <td><span class="badge">${escapeHtml(p.sex)}</span></td>
+        <td>${formatPhone(p.phone_number)}</td>
+        <td>${escapeHtml(p.city)}, ${escapeHtml(p.state)} ${escapeHtml(p.zip_code)}</td>
+        <td>${p.email ? escapeHtml(p.email) : '<span style="color:#64748b">&mdash;</span>'}</td>
+        <td>${formatDate(p.created_at)}</td>
+      </tr>
+    `).join('');
+
+    contentEl.className = '';
+    contentEl.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>DOB</th>
+            <th>Sex</th>
+            <th>Phone</th>
+            <th>Address</th>
+            <th>Email</th>
+            <th>Registered</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  } catch (err) {
+    contentEl.className = 'error';
+    contentEl.textContent = 'Failed to load patients: ' + err.message;
+  }
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function formatPhone(num) {
+  if (!num || num.length !== 10) return escapeHtml(num);
+  return `(${num.slice(0,3)}) ${num.slice(3,6)}-${num.slice(6)}`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+document.getElementById('searchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadPatients();
+});
+
+loadPatients();
+</script>
+
+</body>
+</html>

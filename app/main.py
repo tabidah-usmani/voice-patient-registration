@@ -7,7 +7,8 @@ from datetime import date
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from fastapi import Request
-
+from fastapi.responses import HTMLResponse
+import os
 from app import models, schemas, crud
 from app.database import engine, get_db, Base
 
@@ -76,7 +77,11 @@ def get_patient_calls(patient_id: str, db: Session = Depends(get_db)):
             "created_at": c.created_at,
         } for c in calls
     ])
-
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        return f.read()
 @app.post("/patients", status_code=201)
 def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)):
     existing = crud.get_patient_by_phone(db, patient.phone_number)
