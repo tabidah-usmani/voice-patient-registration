@@ -62,6 +62,21 @@ def get_patient(patient_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Patient not found")
     return envelope(data=schemas.PatientOut.model_validate(patient))
 
+@app.get("/patients/{patient_id}/calls")
+def get_patient_calls(patient_id: str, db: Session = Depends(get_db)):
+    calls = db.query(models.CallTranscript).filter(
+        models.CallTranscript.patient_id == patient_id
+    ).order_by(models.CallTranscript.created_at.desc()).all()
+    return envelope(data=[
+        {
+            "id": c.id,
+            "call_id": c.call_id,
+            "summary": c.summary,
+            "transcript": c.transcript,
+            "created_at": c.created_at,
+        } for c in calls
+    ])
+
 @app.post("/patients", status_code=201)
 def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)):
     existing = crud.get_patient_by_phone(db, patient.phone_number)
@@ -141,6 +156,38 @@ async def vapi_update_patient(request: Request, db: Session = Depends(get_db)):
     updated = crud.update_patient(db, existing.patient_id, update_data)
     logger.info(f"Updated patient via Vapi: {updated.patient_id} {updated.first_name} {updated.last_name}")
     return {"results": [{"toolCallId": call_id, "result": f"Successfully updated {updated.first_name} {updated.last_name}'s record."}]}
+
+@app.post("/vapi/call-ended")
+async def vapi_call_ended(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    message = body.get("message", {})
+
+    # Vapi's end-of-call-report payload shape
+    call = message.get("call", {})
+    call_id = call.get("id")
+    transcript = message.get("transcript")
+    summary = message.get("summary")
+    customer = call.get("customer", {})
+    phone_number = str(customer.get("number", "")).lstrip("+1").strip()
+
+    if not phone_number:
+        logger.warning("Call-ended webhook received with no phone number; skipping transcript save")
+        return {"received": True}
+
+    matched_patient = crud.get_patient_by_phone(db, phone_number)
+
+    record = models.CallTranscript(
+        phone_number=phone_number,
+        patient_id=matched_patient.patient_id if matched_patient else None,
+        transcript=transcript,
+        summary=summary,
+        call_id=call_id,
+    )
+    db.add(record)
+    db.commit()
+
+    logger.info(f"Saved call transcript for {phone_number} (patient_id={record.patient_id})")
+    return {"received": True}
 
 @app.put("/patients/{patient_id}")
 def update_patient(patient_id: str, patient: schemas.PatientUpdate, db: Session = Depends(get_db)):

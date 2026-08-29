@@ -51,7 +51,6 @@ class PatientBase(BaseModel):
         if v is None:
             return v
         v = str(v)
-
         digits = re.sub(r"\D", "", v)
         if len(digits) != 10:
             raise ValueError("Phone number must be a valid 10-digit US number")
@@ -154,3 +153,8 @@ class PatientOut(PatientBase):
 
     class Config:
         from_attributes = True
+class CallTranscriptIn(BaseModel):
+    phone_number: str
+    transcript: Optional[str] = None
+    summary: Optional[str] = None
+    call_id: Optional[str] = None

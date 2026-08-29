@@ -26,3 +26,14 @@ class Patient(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
+
+class CallTranscript(Base):
+    __tablename__ = "call_transcripts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    phone_number = Column(String(10), nullable=False, index=True)
+    patient_id = Column(String, nullable=True)  # linked after lookup, may be null if no match found
+    transcript = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+    call_id = Column(String, nullable=True)  # Vapi's own call identifier
+    created_at = Column(DateTime, default=datetime.utcnow)
