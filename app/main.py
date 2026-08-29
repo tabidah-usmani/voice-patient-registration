@@ -161,8 +161,18 @@ async def vapi_update_patient(request: Request, db: Session = Depends(get_db)):
 async def vapi_call_ended(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
     message = body.get("message", {})
+    message_type = message.get("type")
 
-    # Vapi's end-of-call-report payload shape
+    # Temporary: log every payload type so we can see the real shape
+    logger.info(f"Vapi webhook received, type={message_type}")
+
+    # Only process actual end-of-call reports; ignore all other event types
+    if message_type != "end-of-call-report":
+        return {"received": True, "ignored_type": message_type}
+
+    # Temporary: dump the full end-of-call payload once so we can see its real structure
+    logger.info(f"FULL end-of-call-report payload: {message}")
+
     call = message.get("call", {})
     call_id = call.get("id")
     transcript = message.get("transcript")
