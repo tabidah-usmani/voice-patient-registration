@@ -203,7 +203,26 @@ async def vapi_call_ended(request: Request, db: Session = Depends(get_db)):
 
     logger.info(f"Saved call transcript for {phone_number} (patient_id={record.patient_id})")
     return {"received": True}
+@app.post("/vapi/schedule-appointment")
+async def vapi_schedule_appointment(request: Request):
+    body = await request.json()
+    tool_calls = body.get("message", {}).get("toolCalls", [])
+    if not tool_calls:
+        return {"results": [{"toolCallId": "unknown", "result": "No tool call found"}]}
 
+    call = tool_calls[0]
+    call_id = call.get("id")
+    arguments = call.get("function", {}).get("arguments", {})
+    preferred_day = arguments.get("preferred_day", "the earliest available day")
+
+    logger.info(f"Mock appointment scheduled, preferred_day={preferred_day}")
+
+    return {
+        "results": [{
+            "toolCallId": call_id,
+            "result": f"You're scheduled for a first appointment on Monday at 10:00 AM (based on your preference for {preferred_day}). A confirmation will be sent to the phone number on file."
+        }]
+    }
 @app.put("/patients/{patient_id}")
 def update_patient(patient_id: str, patient: schemas.PatientUpdate, db: Session = Depends(get_db)):
     updated = crud.update_patient(db, patient_id, patient)
