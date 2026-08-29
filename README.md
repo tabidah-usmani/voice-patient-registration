@@ -4,7 +4,7 @@ A voice-based AI agent, reachable by phone, that conversationally registers new 
 
 ## Live Deliverables
 
-- **Phone number:** `<YOUR VAPI PHONE NUMBER>`
+- **Phone number:** `+1 (810) 267 8478`
 - **API base URL:** `https://voice-patient-registration-production-1afc.up.railway.app`
 - **API docs (Swagger UI):** `https://voice-patient-registration-production-1afc.up.railway.app/docs`
 - **Dashboard (read-only patient view):** `https://voice-patient-registration-production-1afc.up.railway.app/dashboard`
