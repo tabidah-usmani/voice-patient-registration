@@ -166,19 +166,24 @@ async function loadPatients() {
     const patients = json.data || [];
 
     statsEl.innerHTML = `
-      <div class="stat">
+    <div class="stat">
         <div class="num">${patients.length}</div>
         <div class="label">Total Patients</div>
-      </div>
-      <div class="stat">
+    </div>
+    <div class="stat">
         <div class="num">${patients.filter(p => p.insurance_provider).length}</div>
         <div class="label">With Insurance</div>
-      </div>
-      <div class="stat">
+    </div>
+    <div class="stat">
         <div class="num">${patients.filter(p => p.emergency_contact_name).length}</div>
         <div class="label">With Emergency Contact</div>
-      </div>
+    </div>
+    <div class="stat" id="callsStat">
+        <div class="num">&hellip;</div>
+        <div class="label">Recorded Calls</div>
+    </div>
     `;
+    loadCallCount();
 
     if (patients.length === 0) {
       contentEl.className = 'empty';
@@ -221,6 +226,18 @@ async function loadPatients() {
   }
 }
 
+async function loadCallCount() {
+  try {
+    const res = await fetch('/calls');
+    const json = await res.json();
+    const calls = json.data || [];
+    const statEl = document.querySelector('#callsStat .num');
+    if (statEl) statEl.textContent = calls.length;
+  } catch (err) {
+    const statEl = document.querySelector('#callsStat .num');
+    if (statEl) statEl.textContent = '—';
+  }
+}
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   const div = document.createElement('div');

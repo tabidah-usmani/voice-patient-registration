@@ -82,6 +82,36 @@ def dashboard():
     dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
     with open(dashboard_path, "r", encoding="utf-8") as f:
         return f.read()
+
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "message": "Voice AI Patient Registration API is live.",
+        "docs": "/docs",
+        "endpoints": {
+            "list_patients": "GET /patients",
+            "get_patient": "GET /patients/{id}",
+            "create_patient": "POST /patients",
+            "update_patient": "PUT /patients/{id}",
+            "delete_patient": "DELETE /patients/{id}"
+        }
+    }
+
+@app.get("/calls")
+def get_all_calls(db: Session = Depends(get_db)):
+    calls = db.query(models.CallTranscript).order_by(
+        models.CallTranscript.created_at.desc()
+    ).limit(50).all()
+    return envelope(data=[
+        {
+            "id": c.id,
+            "phone_number": c.phone_number,
+            "patient_id": c.patient_id,
+            "summary": c.summary,
+            "created_at": c.created_at,
+        } for c in calls
+    ])
 @app.post("/patients", status_code=201)
 def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)):
     existing = crud.get_patient_by_phone(db, patient.phone_number)
@@ -90,6 +120,7 @@ def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)
     created = crud.create_patient(db, patient)
     logger.info(f"Created patient: {created.patient_id} {created.first_name} {created.last_name}")
     return envelope(data=schemas.PatientOut.model_validate(created))
+
 @app.post("/vapi/register-patient")
 async def vapi_register_patient(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -104,7 +135,13 @@ async def vapi_register_patient(request: Request, db: Session = Depends(get_db))
     try:
         patient_data = schemas.PatientCreate(**arguments)
     except Exception as e:
-        return {"results": [{"toolCallId": call_id, "result": f"Validation error: {str(e)}"}]}
+        missing_fields = [err['loc'][0] for err in e.errors()] if hasattr(e, 'errors') else []
+        return {
+            "results": [{
+                "toolCallId": call_id,
+                "result": f"The following required fields were missing from this tool call: {', '.join(missing_fields)}. Please retry this tool call and include ALL of these fields with their actual values from the conversation."
+            }]
+        }
 
     existing = crud.get_patient_by_phone(db, patient_data.phone_number)
     if existing:
@@ -204,6 +241,7 @@ async def vapi_call_ended(request: Request, db: Session = Depends(get_db)):
     logger.info(f"Saved call transcript for {phone_number} (patient_id={record.patient_id})")
     return {"received": True}
 @app.post("/vapi/schedule-appointment")
+
 async def vapi_schedule_appointment(request: Request):
     body = await request.json()
     tool_calls = body.get("message", {}).get("toolCalls", [])
@@ -223,6 +261,7 @@ async def vapi_schedule_appointment(request: Request):
             "result": f"You're scheduled for a first appointment on Monday at 10:00 AM (based on your preference for {preferred_day}). A confirmation will be sent to the phone number on file."
         }]
     }
+
 @app.put("/patients/{patient_id}")
 def update_patient(patient_id: str, patient: schemas.PatientUpdate, db: Session = Depends(get_db)):
     updated = crud.update_patient(db, patient_id, patient)
